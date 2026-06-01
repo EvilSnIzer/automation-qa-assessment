@@ -1,0 +1,324 @@
+{
+  "name": "Uptime Monitor - Conduit RealWorld App",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "e2b3c4d5-0001-4000-b000-000000000001",
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://demo.realworld.show/",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "e2b3c4d5-0001-4000-b000-000000000002",
+      "name": "Ping Conduit App",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 300],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Record response metrics\nconst response = $input.first().json;\nconst statusCode = response.statusCode || 0;\nconst timestamp = new Date().toISOString();\n\n// Calculate approximate response time\nconst startTime = $execution?.startedAt ? new Date($execution.startedAt).getTime() : Date.now() - 1000;\nconst responseTime = Date.now() - startTime;\n\nreturn [{\n  json: {\n    status: statusCode,\n    responseTime: responseTime,\n    timestamp: timestamp,\n    url: 'https://demo.realworld.show/',\n    isHealthy: statusCode === 200,\n    message: statusCode === 200\n      ? `✅ Conduit is UP (${statusCode}) — ${responseTime}ms`\n      : `🔴 Conduit returned ${statusCode} — ${responseTime}ms`\n  }\n}];"
+      },
+      "id": "e2b3c4d5-0001-4000-b000-000000000003",
+      "name": "Record Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle total connection failure (timeout, DNS, etc.)\nconst timestamp = new Date().toISOString();\nconst error = $input.first();\n\nreturn [{\n  json: {\n    status: 0,\n    responseTime: -1,\n    timestamp: timestamp,\n    url: 'https://demo.realworld.show/',\n    isHealthy: false,\n    message: '🔴 Conduit is DOWN — Connection failed after 3 retries',\n    error: error?.json?.message || 'Connection timeout or DNS failure'\n  }\n}];"
+      },
+      "id": "e2b3c4d5-0001-4000-b000-000000000004",
+      "name": "Handle Connection Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 420]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "health-check",
+              "leftValue": "={{ $json.isHealthy }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "e2b3c4d5-0001-4000-b000-000000000005",
+      "name": "Is Healthy?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [780, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log successful health check — no alert needed\nconst data = $input.first().json;\nconsole.log(`[UPTIME] ${data.timestamp} — ${data.message}`);\n\nreturn [{\n  json: {\n    ...data,\n    action: 'logged_healthy',\n    note: 'No alert needed — app is healthy'\n  }\n}];"
+      },
+      "id": "e2b3c4d5-0001-4000-b000-000000000006",
+      "name": "Log Healthy Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1040, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"content\": \"🚨 **UPTIME ALERT**\\n\\n{{ $json.message }}\\n\\n**URL:** {{ $json.url }}\\n**Status Code:** {{ $json.status }}\\n**Response Time:** {{ $json.responseTime }}ms\\n**Timestamp:** {{ $json.timestamp }}\\n{{ $json.error ? '**Error:** ' + $json.error : '' }}\\n\\n_Retries exhausted (3 attempts). Investigate immediately._\",\n  \"username\": \"Uptime Monitor 🔴\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "e2b3c4d5-0001-4000-b000-000000000007",
+      "name": "Alert Discord - App Down",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1040, 420],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
+      },
+      "id": "e2b3c4d5-0001-4000-b000-000000000008",
+      "name": "Daily at 9 AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 640]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build daily summary metadata\nconst now = new Date();\nconst yesterday = new Date(now - 24 * 60 * 60 * 1000);\n\nreturn [{\n  json: {\n    period: `${yesterday.toISOString().split('T')[0]} to ${now.toISOString().split('T')[0]}`,\n    total_checks_expected: 288,\n    generated_at: now.toISOString()\n  }\n}];"
+      },
+      "id": "e2b3c4d5-0001-4000-b000-000000000009",
+      "name": "Build Daily Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [260, 640]
+    },
+    {
+      "parameters": {
+        "url": "https://demo.realworld.show/",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "e2b3c4d5-0001-4000-b000-000000000010",
+      "name": "Daily Health Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 640],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compile daily uptime report\nconst summary = $('Build Daily Summary').first().json;\nconst pingResult = $input.first().json;\nconst statusCode = pingResult.statusCode || 0;\nconst currentStatus = statusCode === 200 ? '✅ UP' : '🔴 DOWN';\n\nconst message = `📊 **Daily Uptime Summary**\\n\\n` +\n  `**Period:** ${summary.period}\\n` +\n  `**Current Status:** ${currentStatus} (HTTP ${statusCode})\\n` +\n  `**Expected Checks (24h):** ${summary.total_checks_expected}\\n` +\n  `**Monitored URL:** https://demo.realworld.show/\\n\\n` +\n  `_For full historical metrics, integrate with a time-series DB or Google Sheets._\\n` +\n  `---\\n_Report generated at ${summary.generated_at}_`;\n\nreturn [{ json: { content: message } }];"
+      },
+      "id": "e2b3c4d5-0001-4000-b000-000000000011",
+      "name": "Format Daily Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [780, 640]
+    },
+    {
+      "parameters": {
+        "url": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"content\": \"{{ $json.content }}\",\n  \"username\": \"Uptime Monitor 📊\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "e2b3c4d5-0001-4000-b000-000000000012",
+      "name": "Send Daily Report to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1040, 640],
+      "onError": "continueErrorOutput"
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Ping Conduit App",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ping Conduit App": {
+      "main": [
+        [
+          {
+            "node": "Record Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Connection Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Metrics": {
+      "main": [
+        [
+          {
+            "node": "Is Healthy?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Connection Error": {
+      "main": [
+        [
+          {
+            "node": "Is Healthy?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Healthy?": {
+      "main": [
+        [
+          {
+            "node": "Log Healthy Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Discord - App Down",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily at 9 AM": {
+      "main": [
+        [
+          {
+            "node": "Build Daily Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Daily Summary": {
+      "main": [
+        [
+          {
+            "node": "Daily Health Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Health Check": {
+      "main": [
+        [
+          {
+            "node": "Format Daily Report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Daily Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Daily Report": {
+      "main": [
+        [
+          {
+            "node": "Send Daily Report to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 2
+}

@@ -1,0 +1,429 @@
+{
+  "name": "Daily Tech Digest - GitHub & README Enrichment",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "d1a2b3c4-0001-4000-a000-000000000001",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/search/repositories",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "language:javascript stars:>100 pushed:>2026-05-01"
+            },
+            {
+              "name": "sort",
+              "value": "stars"
+            },
+            {
+              "name": "order",
+              "value": "desc"
+            },
+            {
+              "name": "per_page",
+              "value": "20"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false
+            }
+          },
+          "timeout": 10000
+        }
+      },
+      "id": "d1a2b3c4-0001-4000-a000-000000000002",
+      "name": "Fetch Trending JS Repos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        300
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter, sort, and keep top 5 repos\nconst items = $input.first().json;\n\nif (!items || !items.items || items.items.length === 0) {\n  throw new Error('No repositories returned from GitHub API');\n}\n\nconst top5 = items.items\n  .filter(repo => !repo.fork && repo.description)\n  .sort((a, b) => b.stargazers_count - a.stargazers_count)\n  .slice(0, 5)\n  .map((repo, index) => ({\n    rank: index + 1,\n    name: repo.full_name,\n    url: repo.html_url,\n    description: repo.description ? repo.description.substring(0, 150) : 'No description',\n    stars: repo.stargazers_count,\n    forks: repo.forks_count,\n    language: repo.language || 'Unknown',\n    open_issues: repo.open_issues_count,\n    updated_at: repo.updated_at,\n    owner: repo.owner.login,\n    default_branch: repo.default_branch\n  }));\n\nreturn top5.map(repo => ({ json: repo }));"
+      },
+      "id": "d1a2b3c4-0001-4000-a000-000000000003",
+      "name": "Transform - Top 5 Repos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "stars-check",
+              "leftValue": "={{ $json.stars }}",
+              "rightValue": 1000,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "d1a2b3c4-0001-4000-a000-000000000004",
+      "name": "IF Stars > 1000",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        780,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/{{ $json.name }}/readme",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github.v3+json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "d1a2b3c4-0001-4000-a000-000000000005",
+      "name": "Enrich - Fetch README",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        200
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format popular repos with README enrichment data\nconst items = $input.all();\nreturn items.map(item => {\n  const repo = item.json;\n  let readmeUrl = '';\n\n  if (repo.download_url) {\n    readmeUrl = repo.download_url;\n  } else if (repo.html_url) {\n    readmeUrl = repo.html_url;\n  }\n\n  return {\n    json: {\n      rank: repo.rank || '⭐',\n      name: repo.name || repo.full_name || 'Unknown',\n      url: repo.url || '',\n      description: repo.description || 'No description',\n      stars: repo.stars || repo.stargazers_count || 0,\n      forks: repo.forks || repo.forks_count || 0,\n      language: repo.language || 'Unknown',\n      open_issues: repo.open_issues || 0,\n      readme_url: readmeUrl,\n      category: '🔥 Popular',\n      enriched: !!repo.download_url\n    }\n  };\n});"
+      },
+      "id": "d1a2b3c4-0001-4000-a000-000000000006",
+      "name": "Format Popular Repos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format non-popular repos as \"Rising\" category\nconst items = $input.all();\nreturn items.map(item => {\n  const repo = item.json;\n  return {\n    json: {\n      rank: repo.rank,\n      name: repo.name,\n      url: repo.url,\n      description: repo.description,\n      stars: repo.stars,\n      forks: repo.forks,\n      language: repo.language,\n      open_issues: repo.open_issues,\n      readme_url: '',\n      category: '📦 Rising',\n      enriched: false\n    }\n  };\n});"
+      },
+      "id": "d1a2b3c4-0001-4000-a000-000000000007",
+      "name": "Format Rising Repos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        420
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d1a2b3c4-0001-4000-a000-000000000008",
+      "name": "Merge Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        1560,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the final digest message for Discord\nconst items = $input.all();\nconst now = new Date().toISOString().split('T')[0];\n\nlet message = '\\u{1F680} **Daily Tech Digest \\u2014 ' + now + '**\\n\\n';\nmessage += '**Top JavaScript Repositories**\\n\\n';\n\nconst popular = items.filter(i => i.json.category === '\\u{1F525} Popular');\nconst rising = items.filter(i => i.json.category === '\\u{1F4E6} Rising');\n\nif (popular.length > 0) {\n  message += '**\\u{1F525} Popular (>1000 stars)**\\n';\n  popular.forEach(i => {\n    const r = i.json;\n    message += '\\n**' + r.rank + '. ' + r.name + '** \\u2014 \\u2B50 ' + r.stars.toLocaleString() + ' | Forks: ' + r.forks + '\\n';\n    message += '> ' + r.description + '\\n';\n    message += '> Link: ' + r.url + '\\n';\n    if (r.readme_url) {\n      message += '> README: ' + r.readme_url + '\\n';\n    }\n  });\n}\n\nif (rising.length > 0) {\n  message += '\\n**\\u{1F4E6} Rising**\\n';\n  rising.forEach(i => {\n    const r = i.json;\n    message += '\\n**' + r.rank + '. ' + r.name + '** \\u2014 \\u2B50 ' + r.stars.toLocaleString() + ' | Forks: ' + r.forks + '\\n';\n    message += '> ' + r.description + '\\n';\n    message += '> Link: ' + r.url + '\\n';\n  });\n}\n\nmessage += '\\n---\\n_Generated by n8n at ' + new Date().toISOString() + '_';\n\nreturn [{ json: { digest: message.substring(0, 2000), repo_count: items.length, timestamp: new Date().toISOString() } }];"
+      },
+      "id": "d1a2b3c4-0001-4000-a000-000000000009",
+      "name": "Build Digest Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1820,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "={{ $json.digest }}"
+            },
+            {
+              "name": "username",
+              "value": "Tech Digest Bot"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "d1a2b3c4-0001-4000-a000-000000000010",
+      "name": "Send to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2080,
+        300
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log the GitHub API error\nconst errorData = $input.all();\nconst errorMessage = errorData.length > 0 ? JSON.stringify(errorData[0].json) : 'Unknown error';\nconst timestamp = new Date().toISOString();\n\nconsole.error(`[${timestamp}] Workflow Error: ${errorMessage}`);\n\nreturn [{\n  json: {\n    error: true,\n    timestamp: timestamp,\n    message: 'GitHub API call failed. Possible causes: rate limiting (60 req/hr unauthenticated), network timeout, or API outage.',\n    raw_error: errorMessage,\n    action: 'Will retry on next scheduled run (1 hour)'\n  }\n}];"
+      },
+      "id": "d1a2b3c4-0001-4000-a000-000000000011",
+      "name": "Handle API Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+        "method": "POST",
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "=Warning: Tech Digest Error - {{ $json.message }}"
+            },
+            {
+              "name": "username",
+              "value": "Tech Digest Bot"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "d1a2b3c4-0001-4000-a000-000000000012",
+      "name": "Send Error to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        780,
+        520
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Graceful fallback when Discord itself fails\nconst timestamp = new Date().toISOString();\nconsole.error(`[${timestamp}] Discord delivery failed. Digest was generated but not delivered.`);\n\nreturn [{\n  json: {\n    fallback: true,\n    message: 'Discord notification failed. Digest generated but not delivered.',\n    timestamp: timestamp\n  }\n}];"
+      },
+      "id": "d1a2b3c4-0001-4000-a000-000000000013",
+      "name": "Handle Discord Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        520
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Trending JS Repos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Trending JS Repos": {
+      "main": [
+        [
+          {
+            "node": "Transform - Top 5 Repos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle API Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform - Top 5 Repos": {
+      "main": [
+        [
+          {
+            "node": "IF Stars > 1000",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Stars > 1000": {
+      "main": [
+        [
+          {
+            "node": "Enrich - Fetch README",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Rising Repos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrich - Fetch README": {
+      "main": [
+        [
+          {
+            "node": "Format Popular Repos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Popular Repos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Popular Repos": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Rising Repos": {
+      "main": [
+        [
+          {
+            "node": "Merge Results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Results": {
+      "main": [
+        [
+          {
+            "node": "Build Digest Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Digest Message": {
+      "main": [
+        [
+          {
+            "node": "Send to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to Discord": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Handle Discord Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle API Error": {
+      "main": [
+        [
+          {
+            "node": "Send Error to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1
+}
